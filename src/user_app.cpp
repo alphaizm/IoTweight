@@ -4,6 +4,7 @@
 #include "qrcode_generator.hpp"
 #include "wifi_webserver.hpp"
 #include <stdio.h>
+#include <string.h>
 
 #if defined(ARDUINO) && defined(ESP_PLATFORM)
 #include <ESP.h>
@@ -13,7 +14,8 @@
 enum AppScreen {
     SCREEN_WIFI_SETUP,  // WiFi設定画面
     SCREEN_START,       // スタート画面
-    SCREEN_MAIN         // メイン画面（ハードウェアデモ）
+    SCREEN_MAIN,        // メイン画面（ハードウェアデモ）
+    SCREEN_VERSION      // バージョン表示画面
 };
 
 static AppScreen current_screen = SCREEN_START;
@@ -31,6 +33,35 @@ static uint8_t qrcode_size = 2;
 static lv_obj_t* label_status = nullptr;
 static lv_obj_t* label_accel = nullptr;
 static lv_obj_t* label_battery = nullptr;
+
+#ifndef APP_VERSION
+#define APP_VERSION "0.0.1"
+#endif
+
+static void format_build_datetime(char* out, int out_size)
+{
+    const char* date = __DATE__;  // "Mmm dd yyyy"
+    const char* time = __TIME__;  // "hh:mm:ss"
+
+    static const char* months[] = {
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    };
+
+    int month = 1;
+    for (int i = 0; i < 12; i++) {
+        if (0 == strncmp(date, months[i], 3)) {
+            month = i + 1;
+            break;
+        }
+    }
+
+    int day = (' ' == date[4]) ? (date[5] - '0') : ((date[4] - '0') * 10 + (date[5] - '0'));
+    int year = (date[7] - '0') * 1000 + (date[8] - '0') * 100 + (date[9] - '0') * 10 + (date[10] - '0');
+
+    // HH:MM のみ使用
+    snprintf(out, out_size, "%04d/%02d/%02d %.5s", year, month, day, time);
+}
 
 ///////////////////////////////////////////////////////////
 //      内部関数
@@ -257,6 +288,47 @@ void create_screen_main(void)
 }
 
 ///////////////////////////////////////
+/// @brief バージョン表示画面のUIを作成
+void create_screen_version(void)
+{
+#if defined(ARDUINO) && defined(ESP_PLATFORM)
+    Serial.println("Creating version screen UI...");
+#else
+    printf("Creating version screen UI...\n");
+#endif
+
+    lv_obj_t* scr = lv_scr_act();
+
+    // 背景を黒に設定
+    lv_obj_set_style_bg_color(scr, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, LV_PART_MAIN);
+
+    // タイトル
+    lv_obj_t* label_title = lv_label_create(scr);
+    lv_label_set_text(label_title, "Version");
+    lv_obj_set_style_text_color(label_title, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_text_font(label_title, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_align(label_title, LV_ALIGN_TOP_MID, 0, 8);
+
+    // バージョン情報
+    lv_obj_t* label_version = lv_label_create(scr);
+    char build_datetime[32];
+    format_build_datetime(build_datetime, sizeof(build_datetime));
+    lv_label_set_text_fmt(label_version, "APP: %s\nBuild: %s", APP_VERSION, build_datetime);
+    lv_obj_set_style_text_color(label_version, lv_color_make(0, 255, 255), LV_PART_MAIN);
+    lv_obj_set_style_text_font(label_version, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_obj_set_style_text_align(label_version, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN);
+    lv_obj_align(label_version, LV_ALIGN_TOP_LEFT, 5, 45);
+
+    // 戻り方
+    lv_obj_t* label_instruction = lv_label_create(scr);
+    lv_label_set_text(label_instruction, "Press A to return");
+    lv_obj_set_style_text_color(label_instruction, lv_color_make(0, 255, 0), LV_PART_MAIN);
+    lv_obj_set_style_text_font(label_instruction, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_obj_align(label_instruction, LV_ALIGN_BOTTOM_MID, 0, -8);
+}
+
+///////////////////////////////////////
 /// @brief ハードウェアデモアプリの更新
 /// ボタン押下、加速度、バッテリー情報を更新
 void update_screen_main(void)
@@ -266,8 +338,49 @@ void update_screen_main(void)
     
     char buf[128];
     static uint32_t counter = 0;
+    static uint32_t button_a_press_start = 0;
+    static bool button_a_long_press_triggered = false;
     static uint32_t button_b_press_start = 0;
     static bool button_b_long_press_triggered = false;
+
+    // Aボタン長押しチェック（バージョン画面へ遷移）
+    if (hw->isButtonAPressed()) {
+        if (0 == button_a_press_start) {
+            button_a_press_start = lv_tick_get();
+            button_a_long_press_triggered = false;
+        } else {
+            uint32_t press_duration = lv_tick_get() - button_a_press_start;
+            if (1500 < press_duration && !button_a_long_press_triggered) {
+                button_a_long_press_triggered = true;
+
+#if defined(ARDUINO) && defined(ESP_PLATFORM)
+                Serial.println("Button A long press detected - transitioning to version screen");
+#else
+                printf("Button A long press detected - transitioning to version screen\n");
+#endif
+
+                lv_obj_clean(lv_scr_act());
+                create_screen_version();
+                current_screen = SCREEN_VERSION;
+
+                button_a_press_start = 0;
+                return;
+            }
+        }
+    } else {
+        // ボタンが離された
+        if (0 != button_a_press_start && !button_a_long_press_triggered) {
+            // 短押しの処理
+            lv_label_set_text(label_status, "Button A pressed!");
+#if defined(ARDUINO) && defined(ESP_PLATFORM)
+            Serial.println("Button A pressed!");
+#else
+            printf("Button A pressed!\n");
+#endif
+        }
+        button_a_press_start = 0;
+        button_a_long_press_triggered = false;
+    }
     
     // Bボタン長押しチェック（WiFi設定リセット）
     if (hw->isButtonBPressed()) {
@@ -301,6 +414,8 @@ void update_screen_main(void)
                 lv_obj_clean(lv_scr_act());
                 create_screen_wifi_setup();
                 current_screen = SCREEN_WIFI_SETUP;
+                button_b_press_start = 0;
+                return;
 #endif
             } else if (!button_b_long_press_triggered) {
                 // 長押し中の視覚的フィードバック
@@ -330,16 +445,6 @@ void update_screen_main(void)
         }
         button_b_press_start = 0;
         button_b_long_press_triggered = false;
-    }
-    
-    // ボタンAチェック
-    if (hw->wasButtonAPressed()) {
-        lv_label_set_text(label_status, "Button A pressed!");
-#if defined(ARDUINO) && defined(ESP_PLATFORM)
-        Serial.println("Button A pressed!");
-#else
-        printf("Button A pressed!\n");
-#endif
     }
     
     // 加速度表示（10回に1回更新）
@@ -554,6 +659,23 @@ void user_app_loop(void)
             // メイン画面：ハードウェアデモの更新
             if (lvgl_port_lock()) {
                 update_screen_main();
+                lvgl_port_unlock();
+            }
+            break;
+
+        case SCREEN_VERSION:
+            // バージョン画面：Aボタン短押しでメイン画面へ戻る
+            if (lvgl_port_lock()) {
+                if (hw->wasButtonAPressed()) {
+#if defined(ARDUINO) && defined(ESP_PLATFORM)
+                    Serial.println("Button A short press - returning to main screen");
+#else
+                    printf("Button A short press - returning to main screen\n");
+#endif
+                    lv_obj_clean(lv_scr_act());
+                    create_screen_main();
+                    current_screen = SCREEN_MAIN;
+                }
                 lvgl_port_unlock();
             }
             break;
