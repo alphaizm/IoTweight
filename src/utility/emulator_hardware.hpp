@@ -29,6 +29,12 @@ public:
     // バッテリー (モックデータ)
     float getBatteryVoltage() override;
     int getBatteryLevel() override;
+
+    // 重量センサー (モックデータ)
+    bool hasWeightSensor() override;
+    float getWeightGrams() override;
+    bool tareWeightSensor() override;
+    bool calibrateWeightSensor(float knownWeightGrams) override;
     
     // LCD輝度
     void setBrightness(uint8_t brightness) override;
@@ -55,6 +61,7 @@ private:
     
     float accel_x, accel_y, accel_z;
     float gyro_x, gyro_y, gyro_z;
+    float weight_grams;
     
     uint8_t brightness;
     float battery_voltage;

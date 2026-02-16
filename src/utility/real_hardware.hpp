@@ -7,6 +7,7 @@
 #include <M5Unified.h>
 #include <WiFi.h>
 #include <Preferences.h>
+#include <HX711.h>
 #endif
 
 /**
@@ -34,6 +35,12 @@ public:
     // バッテリー
     float getBatteryVoltage() override;
     int getBatteryLevel() override;
+
+    // 重量センサー（Scales Kit / HX711）
+    bool hasWeightSensor() override;
+    float getWeightGrams() override;
+    bool tareWeightSensor() override;
+    bool calibrateWeightSensor(float knownWeightGrams) override;
     
     // LCD輝度
     void setBrightness(uint8_t brightness) override;
@@ -57,7 +64,9 @@ private:
     
 #if defined(ARDUINO) && defined(ESP_PLATFORM)
     Preferences preferences;
+    HX711 scale;
 #endif
+    bool scale_ready;
     WiFiStatus wifi_status;
     unsigned long wifi_connect_start;
 };

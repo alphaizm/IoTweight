@@ -56,6 +56,12 @@ public:
     // バッテリー
     virtual float getBatteryVoltage() = 0;
     virtual int getBatteryLevel() = 0;  // 0-100%
+
+    // 重量センサー（Scales Kit / HX711）
+    virtual bool hasWeightSensor() = 0;
+    virtual float getWeightGrams() = 0;
+    virtual bool tareWeightSensor() = 0;
+    virtual bool calibrateWeightSensor(float knownWeightGrams) = 0;
     
     // LCD輝度
     virtual void setBrightness(uint8_t brightness) = 0;  // 0-255

@@ -24,16 +24,25 @@ void setup(void)
 
     // M5GFXの初期化
     gfx.init();
-    gfx.setRotation(1);
+    // 回転指定: 0=0°, 2=180°, 
+    // 1=90°
+        // ┌──────────────────┐
+	    // │    LCD       [A] │ 
+        // └──────────────────┘
+    // 3=270°
+        // ┌──────────────────┐
+        // │ [A]       LCD    │
+        // └──────────────────┘
+    gfx.setRotation(3);
     gfx.setBrightness(200);
     
 #if defined(ARDUINO) && defined(ESP_PLATFORM)
     Serial.println("[1] M5GFX initialized");
     
-    // ハードウェアの初期化（M5.begin()はスキップ）
-    Serial.println("[2] Initializing hardware (buttons only)...");
-    HardwareInterface* hw = getHardware();
-    hw->begin();
+    // ハードウェアの初期化
+    // getHardware() 内で begin() が1回だけ実行される
+    Serial.println("[2] Initializing hardware...");
+    (void)getHardware();
     Serial.flush();
 #else
     printf("M5GFX initialized: %dx%d\n", gfx.width(), gfx.height());

@@ -12,13 +12,23 @@
 #define MPU6886_ACCEL_CONFIG 0x1C
 #define MPU6886_GYRO_CONFIG  0x1B
 
-// AXP192 (Power management) registers
-#define AXP192_ADDRESS      0x34
-#define AXP192_BATT_VOLTAGE 0x78
-#define AXP192_BATT_POWER   0x70
+// Scales Kit (HX711) pins for PortA on M5StickC Plus2
+// Official example (M5StickC-Plus) uses DOUT=33 / SCK=32
+#define HX711_DOUT_PIN      33
+#define HX711_SCK_PIN       32
+
+// 要校正: 既知重量で補正してください
+#ifndef HX711_SCALE_FACTOR
+#define HX711_SCALE_FACTOR 27.61f
+#endif
+
+// Buttons on M5StickC Plus2
+#define BUTTON_A_PIN         37
+#define BUTTON_B_PIN         39
 
 RealHardware::RealHardware()
     : current_brightness(128)
+    , scale_ready(false)
     , wifi_status(WiFiStatus::DISCONNECTED)
     , wifi_connect_start(0)
 {
@@ -36,11 +46,17 @@ void RealHardware::begin()
     Wire.begin(21, 22);
     Wire.setClock(400000);
     Serial.println("  I2C initialized (SDA=21, SCL=22)");
+
+    // StickC系互換: GPIO0をHにして外部回路との干渉を抑止
+    pinMode(0, OUTPUT);
+    digitalWrite(0, HIGH);
+
+    // M5StickC Plus2 は AXP192 非搭載
     
     // Button initialization (GPIO)
-    pinMode(37, INPUT_PULLUP);
-    pinMode(39, INPUT_PULLUP);
-    Serial.println("  Buttons initialized (GPIO 37, 39)");
+    pinMode(BUTTON_A_PIN, INPUT_PULLUP);
+    pinMode(BUTTON_B_PIN, INPUT_PULLUP);
+    Serial.printf("  Buttons initialized (GPIO %d=A, %d=B)\n", BUTTON_A_PIN, BUTTON_B_PIN);
     
     // IMU initialization (MPU6886)
     Wire.beginTransmission(MPU6886_ADDRESS);
@@ -71,6 +87,14 @@ void RealHardware::begin()
     } else {
         Serial.printf("  IMU initialization failed! WHO_AM_I=0x%02X\n", whoami);
     }
+
+    // HX711 initialization（33/32）
+    delay(250);
+    scale.begin(HX711_DOUT_PIN, HX711_SCK_PIN);
+    scale_ready = true;
+    scale.set_scale(HX711_SCALE_FACTOR);
+    scale.tare();
+    Serial.printf("  HX711 initialized successfully (DAT=%d CLK=%d)\n", HX711_DOUT_PIN, HX711_SCK_PIN);
     
     Serial.println("Hardware init completed WITHOUT M5Unified");
 }
@@ -81,12 +105,12 @@ void RealHardware::update()
 
 bool RealHardware::isButtonAPressed()
 {
-    return digitalRead(37) == LOW;
+    return digitalRead(BUTTON_A_PIN) == LOW;
 }
 
 bool RealHardware::isButtonBPressed()
 {
-    return digitalRead(39) == LOW;
+    return digitalRead(BUTTON_B_PIN) == LOW;
 }
 
 bool RealHardware::wasButtonAPressed()
@@ -141,28 +165,76 @@ void RealHardware::getGyro(float* x, float* y, float* z)
 
 float RealHardware::getBatteryVoltage()
 {
-    Wire.beginTransmission(AXP192_ADDRESS);
-    Wire.write(AXP192_BATT_VOLTAGE);
-    Wire.endTransmission(false);
-    Wire.requestFrom(AXP192_ADDRESS, 2);
-    
-    if (Wire.available() >= 2) {
-        uint16_t raw = (Wire.read() << 4) | Wire.read();
-        return raw * 1.1f / 1000.0f;
-    }
-    
     return 0.0f;
 }
 
 int RealHardware::getBatteryLevel()
 {
-    float voltage = getBatteryVoltage();
-    
-    if (voltage >= 4.1f) return 100;
-    if (voltage >= 3.95f) return 75 + (int)((voltage - 3.95f) / 0.15f * 25);
-    if (voltage >= 3.73f) return 25 + (int)((voltage - 3.73f) / 0.22f * 50);
-    if (voltage >= 3.3f) return (int)((voltage - 3.3f) / 0.43f * 25);
     return 0;
+}
+
+bool RealHardware::hasWeightSensor()
+{
+#if defined(ARDUINO) && defined(ESP_PLATFORM)
+    if (scale_ready) {
+        return true;
+    }
+
+    scale_ready = false;
+
+    return false;
+#else
+    return false;
+#endif
+}
+
+float RealHardware::getWeightGrams()
+{
+#if defined(ARDUINO) && defined(ESP_PLATFORM)
+    if (!hasWeightSensor()) {
+        return 0.0f;
+    }
+
+    return scale.get_units(10);
+#else
+    return 0.0f;
+#endif
+}
+
+bool RealHardware::tareWeightSensor()
+{
+#if defined(ARDUINO) && defined(ESP_PLATFORM)
+    if (!hasWeightSensor()) {
+        return false;
+    }
+
+    scale.tare();
+    Serial.println("[Weight] Tare completed");
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool RealHardware::calibrateWeightSensor(float knownWeightGrams)
+{
+#if defined(ARDUINO) && defined(ESP_PLATFORM)
+    if (!hasWeightSensor() || knownWeightGrams <= 0.0f) {
+        return false;
+    }
+
+    long adc = scale.read_average(20) - scale.get_offset();
+    if (adc == 0) {
+        return false;
+    }
+
+    float new_scale = adc / knownWeightGrams;
+    scale.set_scale(new_scale);
+    Serial.printf("[Weight] Calibrated. scale=%.3f (known=%.1fg)\n", new_scale, knownWeightGrams);
+    return true;
+#else
+    return false;
+#endif
 }
 
 void RealHardware::setBrightness(uint8_t brightness)

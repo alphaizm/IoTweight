@@ -14,8 +14,9 @@
 enum AppScreen {
     SCREEN_WIFI_SETUP,  // WiFi設定画面
     SCREEN_START,       // スタート画面
-    SCREEN_MAIN,        // メイン画面（ハードウェアデモ）
-    SCREEN_VERSION      // バージョン表示画面
+    SCREEN_MAIN,        // メイン画面
+    SCREEN_VERSION,     // バージョン表示画面
+    SCREEN_CALIBRATION  // 重量センサー校正画面
 };
 
 static AppScreen current_screen = SCREEN_START;
@@ -31,8 +32,11 @@ static uint8_t qrcode_size = 2;
 
 // ハードウェアインタラクティブなデモアプリ
 static lv_obj_t* label_status = nullptr;
-static lv_obj_t* label_accel = nullptr;
-static lv_obj_t* label_battery = nullptr;
+static lv_obj_t* label_weight_prefix = nullptr;
+static lv_obj_t* label_weight_value = nullptr;
+static lv_obj_t* label_weight_unit = nullptr;
+static lv_obj_t* label_calib_status = nullptr;
+static lv_obj_t* label_calib_weight = nullptr;
 
 #ifndef APP_VERSION
 #define APP_VERSION "0.0.1"
@@ -217,8 +221,8 @@ void create_screen_start(void)
 }
 
 ///////////////////////////////////////
-/// @brief メイン画面のUIを作成
-/// ボタン、加速度、バッテリー情報を表示
+/// @brief メイン画面を作成
+/// ボタン、重量情報を表示
 void create_screen_main(void)
 {
 #if defined(ARDUINO) && defined(ESP_PLATFORM)
@@ -242,42 +246,47 @@ void create_screen_main(void)
     
     // タイトル（白文字）
     lv_obj_t* label_title = lv_label_create(scr);
-    lv_label_set_text(label_title, "M5StickC Plus2");
+    lv_label_set_text(label_title, "IoT Weight Monitor");
     lv_obj_set_style_text_color(label_title, lv_color_white(), LV_PART_MAIN);
-    lv_obj_align(label_title, LV_ALIGN_TOP_MID, 0, 5);
+    lv_obj_set_style_text_font(label_title, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_obj_set_style_text_align(label_title, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_align(label_title, LV_ALIGN_TOP_MID, 0, 0);
     
 #if defined(ARDUINO) && defined(ESP_PLATFORM)
     Serial.println("Title created");
     delay(100);
 #endif
-    
-    // ステータス表示（緑文字）
+
+    // 重量
+    label_weight_prefix = lv_label_create(scr);
+    lv_label_set_text(label_weight_prefix, "weight:");
+    lv_obj_set_style_text_color(label_weight_prefix, lv_color_make(255, 0, 255), LV_PART_MAIN);
+    lv_obj_set_style_text_font(label_weight_prefix, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_obj_align(label_weight_prefix, LV_ALIGN_TOP_LEFT, 5, 40);
+
+    label_weight_value = lv_label_create(scr);
+    lv_label_set_text(label_weight_value, "--.--");
+    lv_obj_set_style_text_color(label_weight_value, lv_color_make(128, 128, 128), LV_PART_MAIN);
+    lv_obj_set_style_text_font(label_weight_value, &lv_font_montserrat_36, LV_PART_MAIN);
+
+    label_weight_unit = lv_label_create(scr);
+    lv_label_set_text(label_weight_unit, "[kg]");
+    lv_obj_set_style_text_color(label_weight_unit, lv_color_make(255, 0, 255), LV_PART_MAIN);
+    lv_obj_set_style_text_font(label_weight_unit, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_obj_align(label_weight_unit, LV_ALIGN_TOP_RIGHT, -5, 40);
+
+    // [kg]の左側に1スペース分空けて、重さ表示を右揃え
+    lv_obj_align_to(label_weight_value, label_weight_unit, LV_ALIGN_OUT_LEFT_MID, -6, 0);
+
     label_status = lv_label_create(scr);
     lv_label_set_text(label_status, "Press A or B");
     lv_obj_set_style_text_color(label_status, lv_color_make(0, 255, 0), LV_PART_MAIN);
-    lv_obj_align(label_status, LV_ALIGN_TOP_LEFT, 5, 25);
+    lv_obj_align(label_status, LV_ALIGN_TOP_LEFT, 5, 60);
     
 #if defined(ARDUINO) && defined(ESP_PLATFORM)
     Serial.println("Status label created");
     delay(100);
 #endif
-    
-    // 加速度表示（黄色文字）
-    label_accel = lv_label_create(scr);
-    lv_label_set_text(label_accel, "Accel:\n  - X: 0.0\n  - Y: 0.0\n  - Z: 1.0");
-    lv_obj_set_style_text_color(label_accel, lv_color_make(255, 255, 0), LV_PART_MAIN);
-    lv_obj_align(label_accel, LV_ALIGN_TOP_LEFT, 5, 50);
-    
-#if defined(ARDUINO) && defined(ESP_PLATFORM)
-    Serial.println("Accel label created");
-    delay(100);
-#endif
-    
-    // バッテリー表示（シアン文字）
-    label_battery = lv_label_create(scr);
-    lv_label_set_text(label_battery, "Battery: ---%");
-    lv_obj_set_style_text_color(label_battery, lv_color_make(0, 255, 255), LV_PART_MAIN);
-    lv_obj_align(label_battery, LV_ALIGN_BOTTOM_LEFT, 5, -5);
     
 #if defined(ARDUINO) && defined(ESP_PLATFORM)
     Serial.println("UI created successfully");
@@ -322,15 +331,126 @@ void create_screen_version(void)
 
     // 戻り方
     lv_obj_t* label_instruction = lv_label_create(scr);
-    lv_label_set_text(label_instruction, "Press A to return");
+    lv_label_set_text(label_instruction, "A: calibrate  B: return");
     lv_obj_set_style_text_color(label_instruction, lv_color_make(0, 255, 0), LV_PART_MAIN);
     lv_obj_set_style_text_font(label_instruction, &lv_font_montserrat_20, LV_PART_MAIN);
     lv_obj_align(label_instruction, LV_ALIGN_BOTTOM_MID, 0, -8);
 }
 
 ///////////////////////////////////////
-/// @brief ハードウェアデモアプリの更新
-/// ボタン押下、加速度、バッテリー情報を更新
+/// @brief 重量センサー校正画面のUIを作成
+void create_screen_calibration(void)
+{
+#if defined(ARDUINO) && defined(ESP_PLATFORM)
+    Serial.println("Creating calibration screen UI...");
+#else
+    printf("Creating calibration screen UI...\n");
+#endif
+
+    lv_obj_t* scr = lv_scr_act();
+
+    lv_obj_set_style_bg_color(scr, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, LV_PART_MAIN);
+
+    lv_obj_t* label_title = lv_label_create(scr);
+    lv_label_set_text(label_title, "Weight Calibration");
+    lv_obj_set_style_text_color(label_title, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_text_font(label_title, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_obj_align(label_title, LV_ALIGN_TOP_MID, 0, 5);
+
+    label_calib_status = lv_label_create(scr);
+    lv_label_set_text(label_calib_status, "A: tare (0g)\nB: calibrate 2000g\nA long: back");
+    lv_obj_set_style_text_color(label_calib_status, lv_color_make(0, 255, 0), LV_PART_MAIN);
+    lv_obj_set_style_text_font(label_calib_status, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_align(label_calib_status, LV_ALIGN_TOP_LEFT, 5, 35);
+
+    label_calib_weight = lv_label_create(scr);
+    lv_label_set_text(label_calib_weight, "Weight: --.- g");
+    lv_obj_set_style_text_color(label_calib_weight, lv_color_make(255, 255, 0), LV_PART_MAIN);
+    lv_obj_set_style_text_font(label_calib_weight, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_obj_align(label_calib_weight, LV_ALIGN_BOTTOM_LEFT, 5, -8);
+}
+
+///////////////////////////////////////
+/// @brief WiFi設定画面の更新（Webサーバー処理）
+void update_wifi_setup(void)
+{
+    HardwareInterface* hw = getHardware();
+    
+    // Webサーバーのリクエスト処理（LVGLロック不要）
+    if (webServer) {
+        webServer->handleClient();
+        
+        // WiFi設定が完了したかチェック
+        if (webServer->isConfigured()) {
+            const char* ssid = webServer->getSSID();
+            const char* password = webServer->getPassword();
+            
+#if defined(ARDUINO) && defined(ESP_PLATFORM)
+            Serial.printf("WiFi configuration received: %s\n", ssid);
+#else
+            printf("WiFi configuration received: %s\n", ssid);
+#endif
+            
+            // 設定を保存
+            hw->saveWiFiConfig(ssid, password);
+            
+            // ステータス更新（LVGLロックが必要）
+            if (lvgl_port_lock()) {
+                lv_label_set_text(label_wifi_status, "Config saved!\nRebooting...");
+                lvgl_port_unlock();
+            }
+            
+            // Webサーバー停止
+            webServer->stop();
+            delete webServer;
+            webServer = nullptr;
+            
+            // APモード停止
+            hw->stopAPMode();
+            
+            // リブート
+#if defined(ARDUINO) && defined(ESP_PLATFORM)
+            delay(2000);
+            ESP.restart();
+#else
+            // エミュレーターでは画面遷移のみ
+            printf("Simulating reboot...\n");
+            if (lvgl_port_lock()) {
+                lv_obj_clean(lv_scr_act());
+                create_screen_start();
+                current_screen = SCREEN_START;
+                lvgl_port_unlock();
+            }
+            
+            // WiFi接続を試行
+            hw->connectWiFi(ssid, password);
+#endif
+        }
+    }
+    
+    // 定期的にステータス更新（点滅効果）- LVGLロックが必要
+    static uint32_t last_blink = 0;
+    static bool blink_state = false;
+    
+    if (1000 < lv_tick_get() - last_blink) {
+        last_blink = lv_tick_get();
+        blink_state = !blink_state;
+        
+        if (lvgl_port_lock()) {
+            if (blink_state) {
+                lv_label_set_text(label_wifi_status, "► Scan QR code\nwith smartphone");
+            } else {
+                lv_label_set_text(label_wifi_status, "  Scan QR code\nwith smartphone");
+            }
+            lvgl_port_unlock();
+        }
+    }
+}
+
+///////////////////////////////////////
+/// @brief メイン画面の更新
+/// ボタン押下、重量情報を更新
 void update_screen_main(void)
 {
     HardwareInterface* hw = getHardware();
@@ -447,109 +567,152 @@ void update_screen_main(void)
         button_b_long_press_triggered = false;
     }
     
-    // 加速度表示（10回に1回更新）
+    // 重量表示（10回に1回更新）
     if (0 == counter % 10) {
-        float ax, ay, az;
-        hw->getAccel(&ax, &ay, &az);
-        snprintf(buf, sizeof(buf), "Accel:\n  - X: %.2f\n  - Y: %.2f\n  - Z: %.2f", ax, ay, az);
-        lv_label_set_text(label_accel, buf);
-#if defined(ARDUINO) && defined(ESP_PLATFORM)
-        if (0 == counter % 100) {  // 100回に1回シリアル出力
-            Serial.printf("Accel: X=%.2f Y=%.2f Z=%.2f\n", ax, ay, az);
+        if (hw->hasWeightSensor()) {
+            float weight = hw->getWeightGrams();
+            float display_weight_kg = weight / 1000.0f;
+            if (display_weight_kg < 0.0f) {
+                display_weight_kg = 0.0f;
+            }
+            snprintf(buf, sizeof(buf), "%.2f", display_weight_kg);
+            if (5000.0f <= weight) {
+                // 5kg以上は白色で表示
+                lv_obj_set_style_text_color(label_weight_value, lv_color_white(), LV_PART_MAIN);
+            } else if (1000.0f <= weight) {
+                // 1kg以上は黄色で表示
+                lv_obj_set_style_text_color(label_weight_value, lv_color_make(0, 255, 255), LV_PART_MAIN);
+            } else {
+                // 1kg未満は赤色で表示
+                lv_obj_set_style_text_color(label_weight_value, lv_color_make(0, 255, 0), LV_PART_MAIN);
+            }
+            lv_label_set_text(label_weight_value, buf);
+            lv_obj_align_to(label_weight_value, label_weight_unit, LV_ALIGN_OUT_LEFT_MID, -6, 0);
+        } else {
+            lv_obj_set_style_text_color(label_weight_value, lv_color_make(128, 128, 128), LV_PART_MAIN);
+            lv_label_set_text(label_weight_value, "--.--");
+            lv_obj_align_to(label_weight_value, label_weight_unit, LV_ALIGN_OUT_LEFT_MID, -6, 0);
         }
-#endif
     }
     
-    // バッテリー表示（100回に1回更新）
-    if (0 == counter % 100) {
-        int battery = hw->getBatteryLevel();
-        float voltage = hw->getBatteryVoltage();
-        snprintf(buf, sizeof(buf), "Battery: %d%% %.2fV", battery, voltage);
-        lv_label_set_text(label_battery, buf);
-#if defined(ARDUINO) && defined(ESP_PLATFORM)
-        Serial.printf("Battery: %d%% %.2fV\n", battery, voltage);
-#endif
+    if (0x09U <= counter) {
+        counter = 0;
+    } else {
+        counter++;
     }
-    
-    counter++;
 }
 
 ///////////////////////////////////////
-/// @brief WiFi設定画面の更新（Webサーバー処理）
-void update_wifi_setup(void)
+/// @brief 重量センサー校正画面の更新
+void update_screen_calibration(void)
 {
     HardwareInterface* hw = getHardware();
-    
-    // Webサーバーのリクエスト処理（LVGLロック不要）
-    if (webServer) {
-        webServer->handleClient();
-        
-        // WiFi設定が完了したかチェック
-        if (webServer->isConfigured()) {
-            const char* ssid = webServer->getSSID();
-            const char* password = webServer->getPassword();
-            
-#if defined(ARDUINO) && defined(ESP_PLATFORM)
-            Serial.printf("WiFi configuration received: %s\n", ssid);
-#else
-            printf("WiFi configuration received: %s\n", ssid);
-#endif
-            
-            // 設定を保存
-            hw->saveWiFiConfig(ssid, password);
-            
-            // ステータス更新（LVGLロックが必要）
-            if (lvgl_port_lock()) {
-                lv_label_set_text(label_wifi_status, "Config saved!\nRebooting...");
-                lvgl_port_unlock();
-            }
-            
-            // Webサーバー停止
-            webServer->stop();
-            delete webServer;
-            webServer = nullptr;
-            
-            // APモード停止
-            hw->stopAPMode();
-            
-            // リブート
-#if defined(ARDUINO) && defined(ESP_PLATFORM)
-            delay(2000);
-            ESP.restart();
-#else
-            // エミュレーターでは画面遷移のみ
-            printf("Simulating reboot...\n");
-            if (lvgl_port_lock()) {
+    static uint32_t button_a_press_start = 0;
+    static bool button_a_long_press_triggered = false;
+    static uint32_t counter = 0;
+
+    if (hw->isButtonAPressed()) {
+        if (0 == button_a_press_start) {
+            button_a_press_start = lv_tick_get();
+            button_a_long_press_triggered = false;
+        } else {
+            uint32_t press_duration = lv_tick_get() - button_a_press_start;
+            if (1500 < press_duration && !button_a_long_press_triggered) {
+                button_a_long_press_triggered = true;
                 lv_obj_clean(lv_scr_act());
-                create_screen_start();
-                current_screen = SCREEN_START;
-                lvgl_port_unlock();
+                create_screen_main();
+                current_screen = SCREEN_MAIN;
+                button_a_press_start = 0;
+                return;
             }
-            
-            // WiFi接続を試行
-            hw->connectWiFi(ssid, password);
-#endif
+        }
+    } else {
+        if (0 != button_a_press_start && !button_a_long_press_triggered) {
+            if (hw->tareWeightSensor()) {
+                lv_label_set_text(label_calib_status, "Tare done\nPlace 2000g\nPress B to calibrate");
+            } else {
+                lv_label_set_text(label_calib_status, "Tare failed\nCheck sensor connection");
+            }
+        }
+        button_a_press_start = 0;
+        button_a_long_press_triggered = false;
+    }
+
+    if (hw->wasButtonBPressed()) {
+        if (hw->calibrateWeightSensor(2000.0f)) {
+            lv_label_set_text(label_calib_status, "Calibrated (2000g)\nA long: back");
+        } else {
+            lv_label_set_text(label_calib_status, "Calibration failed\nPlace 2000g and retry");
         }
     }
-    
-    // 定期的にステータス更新（点滅効果）- LVGLロックが必要
-    static uint32_t last_blink = 0;
-    static bool blink_state = false;
-    
-    if (1000 < lv_tick_get() - last_blink) {
-        last_blink = lv_tick_get();
-        blink_state = !blink_state;
-        
-        if (lvgl_port_lock()) {
-            if (blink_state) {
-                lv_label_set_text(label_wifi_status, "► Scan QR code\nwith smartphone");
-            } else {
-                lv_label_set_text(label_wifi_status, "  Scan QR code\nwith smartphone");
-            }
-            lvgl_port_unlock();
+
+    if (0 == counter % 10) {
+        if (hw->hasWeightSensor()) {
+            char buf[64];
+            float w = hw->getWeightGrams();
+            snprintf(buf, sizeof(buf), "Weight: %.1f g", w);
+            lv_label_set_text(label_calib_weight, buf);
+        } else {
+            lv_label_set_text(label_calib_weight, "Weight: sensor N/A");
         }
+    }
+
+    if (0x09U <= counter) {
+        counter = 0;
+    } else {
+        counter++;
     }
 }
+
+///////////////////////////////////////
+/// @brief スタート画面の更新
+void update_screen_start(void)
+{
+    HardwareInterface* hw = getHardware();
+
+    // Aボタン短押しでメイン画面へ遷移
+    if (hw->wasButtonAPressed()) {
+#if defined(ARDUINO) && defined(ESP_PLATFORM)
+    Serial.println("Button A pressed - transitioning to main screen");
+#else
+    printf("Button A pressed - transitioning to main screen\n");
+#endif
+    lv_obj_clean(lv_scr_act());
+    create_screen_main();
+    current_screen = SCREEN_MAIN;
+    }
+}
+
+///////////////////////////////////////
+/// @brief バージョン画面の更新
+void update_screen_version(void)
+{
+    HardwareInterface* hw = getHardware();
+
+    // Aボタン短押しでキャリブレーション画面へ遷移
+    if (hw->wasButtonAPressed()) {
+#if defined(ARDUINO) && defined(ESP_PLATFORM)
+        Serial.println("Button A short press - transitioning to calibration screen");
+#else
+        printf("Button A short press - transitioning to calibration screen\n");
+#endif
+        lv_obj_clean(lv_scr_act());
+        create_screen_calibration();
+        current_screen = SCREEN_CALIBRATION;
+    }
+    // Bボタン短押しでメイン画面へ遷移
+    else if (hw->wasButtonBPressed()) {
+#if defined(ARDUINO) && defined(ESP_PLATFORM)
+        Serial.println("Button B short press - returning to main screen");
+#else
+        printf("Button B short press - returning to main screen\n");
+#endif
+        lv_obj_clean(lv_scr_act());
+        create_screen_main();
+        current_screen = SCREEN_MAIN;
+    }
+}
+
 
 ///////////////////////////////////////////////////////////
 //      外部関数
@@ -641,22 +804,13 @@ void user_app_loop(void)
         case SCREEN_START:
             // スタート画面：Aボタンでメイン画面へ遷移
             if (lvgl_port_lock()) {
-                if (hw->wasButtonAPressed()) {
-#if defined(ARDUINO) && defined(ESP_PLATFORM)
-                    Serial.println("Button A pressed - transitioning to main screen");
-#else
-                    printf("Button A pressed - transitioning to main screen\n");
-#endif
-                    lv_obj_clean(lv_scr_act());  // 現在の画面内容をクリア
-                    create_screen_main();
-                    current_screen = SCREEN_MAIN;
-                }
+                update_screen_start();
                 lvgl_port_unlock();
             }
             break;
             
         case SCREEN_MAIN:
-            // メイン画面：ハードウェアデモの更新
+            // メイン画面：重量計表示の更新
             if (lvgl_port_lock()) {
                 update_screen_main();
                 lvgl_port_unlock();
@@ -664,18 +818,16 @@ void user_app_loop(void)
             break;
 
         case SCREEN_VERSION:
-            // バージョン画面：Aボタン短押しでメイン画面へ戻る
+            // バージョン画面：Aボタン短押しでキャリブレーション画面、Bボタン短押しでメイン画面
             if (lvgl_port_lock()) {
-                if (hw->wasButtonAPressed()) {
-#if defined(ARDUINO) && defined(ESP_PLATFORM)
-                    Serial.println("Button A short press - returning to main screen");
-#else
-                    printf("Button A short press - returning to main screen\n");
-#endif
-                    lv_obj_clean(lv_scr_act());
-                    create_screen_main();
-                    current_screen = SCREEN_MAIN;
-                }
+                update_screen_version();
+                lvgl_port_unlock();
+            }
+            break;
+
+        case SCREEN_CALIBRATION:
+            if (lvgl_port_lock()) {
+                update_screen_calibration();
                 lvgl_port_unlock();
             }
             break;

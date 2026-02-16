@@ -25,6 +25,7 @@ EmulatorHardware::EmulatorHardware()
     , gyro_x(0.0f)
     , gyro_y(0.0f)
     , gyro_z(0.0f)
+    , weight_grams(0.0f)
     , brightness(128)
     , battery_voltage(4.2f)
     , wifi_status(WiFiStatus::DISCONNECTED)
@@ -66,6 +67,9 @@ void EmulatorHardware::update()
     accel_x = std::sin(angle) * 0.1f;
     accel_y = std::cos(angle) * 0.1f;
     accel_z = 1.0f;
+
+    // モック重量データ（0g〜2000gの間で変動）
+    weight_grams = 1000.0f + std::sin(angle * 0.35f) * 1000.0f;
     
     // バッテリーレベルを徐々に減少（デモ用）
     static int counter = 0;
@@ -126,6 +130,28 @@ int EmulatorHardware::getBatteryLevel()
     if (level < 0.0f) level = 0.0f;
     if (level > 100.0f) level = 100.0f;
     return (int)level;
+}
+
+bool EmulatorHardware::hasWeightSensor()
+{
+    return true;
+}
+
+float EmulatorHardware::getWeightGrams()
+{
+    return weight_grams;
+}
+
+bool EmulatorHardware::tareWeightSensor()
+{
+    printf("[Emulator Weight] Tare done\n");
+    return true;
+}
+
+bool EmulatorHardware::calibrateWeightSensor(float knownWeightGrams)
+{
+    printf("[Emulator Weight] Calibrated with %.1fg\n", knownWeightGrams);
+    return true;
 }
 
 void EmulatorHardware::setBrightness(uint8_t value)
